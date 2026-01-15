@@ -8,9 +8,6 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  // Optional: use a direct (non-pooler) connection for migrations/introspection.
-  // Useful with Supabase (use Direct connection string for DIRECT_URL).
-  directUrl = env("DIRECT_URL")
 }
 
 model TrackedWallet {
