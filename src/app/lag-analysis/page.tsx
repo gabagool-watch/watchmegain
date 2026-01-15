@@ -786,6 +786,126 @@ export default function LagAnalysisPage() {
                 </LineChart>
               </ResponsiveContainer>
             </div>
+
+            {/* COMBINED: Delta + Poly correlation chart */}
+            <div className="mt-6 bg-slate-900 rounded-lg p-4">
+              <h3 className="text-sm font-semibold text-slate-200 mb-2">
+                📊 Delta vs Poly Correlation — KEY STRATEGY VIEW
+              </h3>
+              <p className="text-xs text-slate-400 mb-3">
+                Wanneer delta (Chainlink - Binance) groeit → BTC stijgt op Binance voordat Chainlink/Polymarket het ziet.
+                Kijk hoe Poly UP/DOWN reageert op delta-veranderingen.
+              </p>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart
+                  data={liveSeriesWindow.map((p) => {
+                    const delta = p.spread; // Chainlink - Binance
+                    return {
+                      ts: p.t,
+                      time: new Date(p.t).toLocaleTimeString(),
+                      delta,
+                      polyUp: p.polyUp,
+                      polyDown: p.polyDown,
+                    };
+                  })}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis
+                    dataKey="ts"
+                    stroke="#9ca3af"
+                    tick={{ fill: '#9ca3af' }}
+                    tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString()}
+                    interval="preserveStartEnd"
+                  />
+                  {/* Left Y-axis: Delta in USD */}
+                  <YAxis
+                    yAxisId="delta"
+                    stroke="#f59e0b"
+                    tick={{ fill: '#f59e0b' }}
+                    tickFormatter={(v) => (typeof v === 'number' ? v.toFixed(1) : v)}
+                    domain={['dataMin - 5', 'dataMax + 5']}
+                    width={60}
+                    label={{ value: 'Δ ($)', angle: -90, position: 'insideLeft', fill: '#f59e0b', fontSize: 12 }}
+                  />
+                  {/* Right Y-axis: Poly share price 0-1 */}
+                  <YAxis
+                    yAxisId="poly"
+                    orientation="right"
+                    stroke="#8b5cf6"
+                    tick={{ fill: '#8b5cf6' }}
+                    domain={[0, 1]}
+                    tickFormatter={(v) => (typeof v === 'number' ? v.toFixed(2) : v)}
+                    width={50}
+                    label={{ value: 'Poly', angle: 90, position: 'insideRight', fill: '#8b5cf6', fontSize: 12 }}
+                  />
+                  <ReferenceLine yAxisId="delta" y={0} stroke="#64748b" strokeDasharray="2 2" />
+                  <ReferenceLine yAxisId="delta" y={5} stroke="#22c55e" strokeDasharray="4 4" strokeOpacity={0.5} />
+                  <ReferenceLine yAxisId="delta" y={-5} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.5} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#1f2937',
+                      border: '1px solid #374151',
+                      borderRadius: '8px',
+                    }}
+                    labelFormatter={(v) => new Date(Number(v)).toLocaleTimeString()}
+                    formatter={(value: any, name: string) => {
+                      if (name === 'Delta (CL-BN)') return [`$${Number(value).toFixed(2)}`, name];
+                      return [Number(value).toFixed(3), name];
+                    }}
+                  />
+                  <Legend />
+                  <Brush
+                    dataKey="ts"
+                    height={20}
+                    travellerWidth={8}
+                    stroke="#64748b"
+                    tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString()}
+                  />
+                  {/* Delta line - THICK, prominent */}
+                  <Line
+                    yAxisId="delta"
+                    type="stepAfter"
+                    dataKey="delta"
+                    stroke="#f59e0b"
+                    strokeWidth={3}
+                    dot={false}
+                    isAnimationActive={false}
+                    name="Delta (CL-BN)"
+                  />
+                  {/* Poly UP - on right axis */}
+                  {showPolyUpLine && (
+                    <Line
+                      yAxisId="poly"
+                      type="monotone"
+                      dataKey="polyUp"
+                      stroke="#3b82f6"
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                      name="Poly UP"
+                    />
+                  )}
+                  {/* Poly DOWN - on right axis */}
+                  {showPolyDownLine && (
+                    <Line
+                      yAxisId="poly"
+                      type="monotone"
+                      dataKey="polyDown"
+                      stroke="#a855f7"
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                      name="Poly DOWN"
+                    />
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
+              <div className="text-xs text-slate-500 mt-2">
+                <strong>Strategie hint:</strong> Als delta negatief wordt (Binance stijgt sneller dan Chainlink ziet) 
+                → verwacht Poly UP stijging. Als delta positief wordt (Binance daalt sneller) → verwacht Poly DOWN stijging.
+                De referentielijnen op ±$5 markeren potentiële entry triggers.
+              </div>
+            </div>
           </div>
         )}
 
