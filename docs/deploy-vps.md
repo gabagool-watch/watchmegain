@@ -118,15 +118,13 @@ If you prefer Supabase (hosted Postgres):
 
 - Create a Supabase project
 - In Supabase dashboard → **Project Settings → Database**
-  - Copy the **Connection string** (Direct / non-pooler) and use it for `DIRECT_URL`
-  - Use the direct URL for `DATABASE_URL` too (simplest), or if you use a pooler for runtime, keep `DIRECT_URL` as direct.
+  - Copy the **Direct connection string** (non-pooler)
 
 In `/opt/pnltracker/.env`, set at least:
 
 ```env
 # Must include sslmode=require for Supabase
 DATABASE_URL=postgresql://postgres:<PASSWORD>@<HOST>:5432/postgres?schema=public&sslmode=require
-DIRECT_URL=postgresql://postgres:<PASSWORD>@<HOST>:5432/postgres?schema=public&sslmode=require
 ```
 
 Then start with the Supabase compose file (no local Postgres container):
