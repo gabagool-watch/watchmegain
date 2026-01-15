@@ -108,6 +108,14 @@ cd /opt/pnltracker
 docker compose -f /opt/pnltracker/docker-compose.prod.yml up -d --build
 ```
 
+If port 80 is already in use (another project on the same VPS), set `APP_PORT` in `.env`, e.g.:
+
+```env
+APP_PORT=3002
+```
+
+Then the app will be reachable at `http://<VPS_IP>:3002/`.
+
 What happens:
 
 - Postgres/Redis start
