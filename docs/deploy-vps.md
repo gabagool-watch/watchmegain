@@ -74,6 +74,19 @@ Edit:
 nano /opt/pnltracker/.env
 ```
 
+### Database URL (important)
+
+If your `POSTGRES_PASSWORD` contains special characters (like `@`, `:`, `/`, `#`, `?`, `%`), it can break the auto-built Postgres URL.
+
+Safest options:
+
+- Use a **URL-safe** password (letters/numbers only), **or**
+- Set `DATABASE_URL` yourself (URL-encode the password), e.g.
+
+```env
+DATABASE_URL=postgresql://postgres:<URL_ENCODED_PASSWORD>@postgres:5432/pnltracker?schema=public
+```
+
 Minimum recommended values:
 
 ```env
