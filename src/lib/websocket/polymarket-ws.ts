@@ -12,6 +12,7 @@
 
 import { EventEmitter } from 'events';
 import crypto from 'crypto';
+import type WebSocket from 'ws';
 
 // ws optionally uses native addons like `bufferutil`. On very new Node versions these can misbehave
 // (e.g. "bufferUtil.mask is not a function"). Force ws to use the pure-JS implementation.
@@ -19,8 +20,10 @@ process.env.WS_NO_BUFFER_UTIL = process.env.WS_NO_BUFFER_UTIL || '1';
 process.env.WS_NO_UTF_8_VALIDATE = process.env.WS_NO_UTF_8_VALIDATE || '1';
 
 // IMPORTANT: do not `import WebSocket from 'ws'` because the env vars above must be set before ws is loaded.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const WebSocket = require('ws') as typeof import('ws');
+const WebSocketCtor = require('ws') as unknown as {
+  new (address: string | URL, options?: any): WebSocket;
+  readonly OPEN: number;
+};
 
 const WS_MARKET_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
 const WS_USER_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/user';
@@ -192,7 +195,7 @@ export class PolymarketWebSocket extends EventEmitter {
    * Connect to the public market WebSocket
    */
   async connectMarket(): Promise<void> {
-    if (this.marketWs?.readyState === WebSocket.OPEN || this.isConnecting) {
+    if (this.marketWs?.readyState === WebSocketCtor.OPEN || this.isConnecting) {
       console.log('Market WebSocket already connected or connecting');
       return;
     }
@@ -202,7 +205,7 @@ export class PolymarketWebSocket extends EventEmitter {
     return new Promise((resolve, reject) => {
       try {
         console.log('🔌 Connecting to Polymarket Market WebSocket...');
-        this.marketWs = new WebSocket(WS_MARKET_URL);
+        this.marketWs = new WebSocketCtor(WS_MARKET_URL);
 
         this.marketWs.on('open', () => {
           console.log('✅ Connected to Polymarket Market WebSocket');
@@ -255,7 +258,7 @@ export class PolymarketWebSocket extends EventEmitter {
       return;
     }
 
-    if (this.userWs?.readyState === WebSocket.OPEN || this.isUserConnecting) {
+    if (this.userWs?.readyState === WebSocketCtor.OPEN || this.isUserConnecting) {
       console.log('User WebSocket already connected or connecting');
       return;
     }
@@ -271,7 +274,7 @@ export class PolymarketWebSocket extends EventEmitter {
         const signature = this.generateSignature(timestamp, 'GET', '/ws/user');
         
         // Connect with auth headers
-        this.userWs = new WebSocket(WS_USER_URL, {
+        this.userWs = new WebSocketCtor(WS_USER_URL, {
           headers: {
             'POLY_API_KEY': this.apiKey,
             'POLY_SIGNATURE': signature,
@@ -340,7 +343,7 @@ export class PolymarketWebSocket extends EventEmitter {
    * Subscribe to user updates (orders, trades)
    */
   private subscribeToUserUpdates(): void {
-    if (this.userWs?.readyState !== WebSocket.OPEN) {
+    if (this.userWs?.readyState !== WebSocketCtor.OPEN) {
       return;
     }
 
@@ -393,7 +396,7 @@ export class PolymarketWebSocket extends EventEmitter {
     
     this.subscribedAssets.add(assetId);
     
-    if (this.marketWs?.readyState !== WebSocket.OPEN) {
+    if (this.marketWs?.readyState !== WebSocketCtor.OPEN) {
       console.log(`Queued subscription for ${assetId} (WebSocket not connected)`);
       return;
     }
@@ -417,7 +420,7 @@ export class PolymarketWebSocket extends EventEmitter {
       this.subscribedAssets.add(assetId);
     }
     
-    if (this.marketWs?.readyState !== WebSocket.OPEN) {
+    if (this.marketWs?.readyState !== WebSocketCtor.OPEN) {
       console.log(`Queued ${assetIds.length} subscriptions (WebSocket not connected)`);
       return;
     }
@@ -443,7 +446,7 @@ export class PolymarketWebSocket extends EventEmitter {
   unsubscribeFromAsset(assetId: string): void {
     this.subscribedAssets.delete(assetId);
     
-    if (this.marketWs?.readyState !== WebSocket.OPEN) {
+    if (this.marketWs?.readyState !== WebSocketCtor.OPEN) {
       return;
     }
 
@@ -693,7 +696,7 @@ export class PolymarketWebSocket extends EventEmitter {
     
     const interval = setInterval(() => {
       const ws = type === 'market' ? this.marketWs : this.userWs;
-      if (ws?.readyState === WebSocket.OPEN) {
+      if (ws?.readyState === WebSocketCtor.OPEN) {
         ws.ping();
       }
     }, 30000);
@@ -724,14 +727,14 @@ export class PolymarketWebSocket extends EventEmitter {
    * Get market connection status
    */
   isConnected(): boolean {
-    return this.marketWs?.readyState === WebSocket.OPEN;
+    return this.marketWs?.readyState === WebSocketCtor.OPEN;
   }
 
   /**
    * Get user connection status
    */
   isUserConnected(): boolean {
-    return this.userWs?.readyState === WebSocket.OPEN;
+    return this.userWs?.readyState === WebSocketCtor.OPEN;
   }
 
   /**
