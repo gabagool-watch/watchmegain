@@ -7,9 +7,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-pnltracker}
-    ports:
-      # Optional: expose to host (can remove if you only access via containers)
-      - "5432:5432"
+    # Do NOT expose Postgres publicly on a VPS. Containers can reach it over the docker network.
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,9 +20,7 @@ services:
     image: redis:7-alpine
     container_name: pnltracker-redis
     restart: unless-stopped
-    ports:
-      # Optional: expose to host
-      - "6379:6379"
+    # Do NOT expose Redis publicly on a VPS. Containers can reach it over the docker network.
     volumes:
       - redis_data:/data
     healthcheck:
@@ -54,7 +50,8 @@ services:
     container_name: pnltracker-app
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # Bind directly to port 80 so you can use http://<IP>/
+      - "80:3000"
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pnltracker}?schema=public
       REDIS_URL: redis://redis:6379
