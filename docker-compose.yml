@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: pnltracker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pnltracker
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis (optional, for job queue)
+  redis:
+    image: redis:7-alpine
+    container_name: pnltracker-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Next.js Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pnltracker-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/pnltracker?schema=public
+      REDIS_URL: redis://redis:6379
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NODE_ENV: production
+      # Data Provider Configuration
+      DATA_PROVIDER: ${DATA_PROVIDER:-polymarket}
+      GOLDSKY_ACTIVITY_ENDPOINT: ${GOLDSKY_ACTIVITY_ENDPOINT:-}
+      GOLDSKY_POSITIONS_ENDPOINT: ${GOLDSKY_POSITIONS_ENDPOINT:-}
+      GAMMA_MARKETS_API: ${GAMMA_MARKETS_API:-https://gamma-api.polymarket.com}
+      POLYMARKET_CLOB_API: ${POLYMARKET_CLOB_API:-https://clob.polymarket.com}
+      API_RATE_LIMIT_MS: ${API_RATE_LIMIT_MS:-100}
+      API_MAX_RETRIES: ${API_MAX_RETRIES:-3}
+      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-120}
+      REORG_LOOKBACK_MINUTES: ${REORG_LOOKBACK_MINUTES:-120}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: pnltracker-network

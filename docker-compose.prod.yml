@@ -1,0 +1,158 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: pnltracker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-pnltracker}
+    ports:
+      # Optional: expose to host (can remove if you only access via containers)
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: pnltracker-redis
+    restart: unless-stopped
+    ports:
+      # Optional: expose to host
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot DB migration on boot / deploy
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.jobs
+    container_name: pnltracker-migrate
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pnltracker}?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["npm", "run", "-s", "db:deploy"]
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pnltracker-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pnltracker}?schema=public
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      # Data Provider Configuration
+      DATA_PROVIDER: ${DATA_PROVIDER:-polymarket}
+      GOLDSKY_ACTIVITY_ENDPOINT: ${GOLDSKY_ACTIVITY_ENDPOINT:-}
+      GOLDSKY_POSITIONS_ENDPOINT: ${GOLDSKY_POSITIONS_ENDPOINT:-}
+      GAMMA_MARKETS_API: ${GAMMA_MARKETS_API:-https://gamma-api.polymarket.com}
+      POLYMARKET_CLOB_API: ${POLYMARKET_CLOB_API:-https://clob.polymarket.com}
+      POLYMARKET_DATA_API: ${POLYMARKET_DATA_API:-https://data-api.polymarket.com}
+      API_RATE_LIMIT_MS: ${API_RATE_LIMIT_MS:-100}
+      API_MAX_RETRIES: ${API_MAX_RETRIES:-3}
+      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-120}
+      REORG_LOOKBACK_MINUTES: ${REORG_LOOKBACK_MINUTES:-120}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}
+      # Optional auth for user WS / trading
+      POLYMARKET_API_KEY: ${POLYMARKET_API_KEY:-}
+      POLYMARKET_API_SECRET: ${POLYMARKET_API_SECRET:-}
+      POLYMARKET_API_PASSPHRASE: ${POLYMARKET_API_PASSPHRASE:-}
+      POLYMARKET_ADDRESS: ${POLYMARKET_ADDRESS:-}
+      POLYMARKET_PRIVATE_KEY: ${POLYMARKET_PRIVATE_KEY:-}
+      # Keep-alive
+      POLY_HTTP_KEEPALIVE: ${POLY_HTTP_KEEPALIVE:-1}
+      POLY_HTTP_KEEPALIVE_CONNECTIONS: ${POLY_HTTP_KEEPALIVE_CONNECTIONS:-50}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.jobs
+    container_name: pnltracker-worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pnltracker}?schema=public
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      DATA_PROVIDER: ${DATA_PROVIDER:-polymarket}
+      GOLDSKY_ACTIVITY_ENDPOINT: ${GOLDSKY_ACTIVITY_ENDPOINT:-}
+      GOLDSKY_POSITIONS_ENDPOINT: ${GOLDSKY_POSITIONS_ENDPOINT:-}
+      GAMMA_MARKETS_API: ${GAMMA_MARKETS_API:-https://gamma-api.polymarket.com}
+      POLYMARKET_CLOB_API: ${POLYMARKET_CLOB_API:-https://clob.polymarket.com}
+      POLYMARKET_DATA_API: ${POLYMARKET_DATA_API:-https://data-api.polymarket.com}
+      API_RATE_LIMIT_MS: ${API_RATE_LIMIT_MS:-100}
+      API_MAX_RETRIES: ${API_MAX_RETRIES:-3}
+      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-120}
+      REORG_LOOKBACK_MINUTES: ${REORG_LOOKBACK_MINUTES:-120}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command: ["npm", "run", "-s", "worker"]
+
+  lag_recorder:
+    build:
+      context: .
+      dockerfile: Dockerfile.jobs
+    container_name: pnltracker-lag-recorder
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pnltracker}?schema=public
+      NODE_ENV: production
+      # Sampling / sources
+      BINANCE_SAMPLE_MS: ${BINANCE_SAMPLE_MS:-100}
+      BINANCE_WS_URL: ${BINANCE_WS_URL:-wss://stream.binance.com:9443/ws/btcusdt@bookTicker}
+      POLYMARKET_RTDS_URL: ${POLYMARKET_RTDS_URL:-wss://ws-live-data.polymarket.com}
+      POLYGON_WSS_URL: ${POLYGON_WSS_URL:-}
+      CHAINLINK_POLL_MS: ${CHAINLINK_POLL_MS:-250}
+      CHAINLINK_BTC_USD_FEED_ADDRESS: ${CHAINLINK_BTC_USD_FEED_ADDRESS:-0xc907E116054Ad103354f2D350FD2514433D57F6f}
+      CHAINLINK_DECIMALS: ${CHAINLINK_DECIMALS:-8}
+      GAMMA_MARKETS_API: ${GAMMA_MARKETS_API:-https://gamma-api.polymarket.com}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command: ["npm", "run", "-s", "lag-recorder"]
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: pnltracker-network

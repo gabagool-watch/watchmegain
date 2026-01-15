@@ -1,0 +1,17 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install deps (includes devDeps because we need tsx for the job runners)
+COPY package*.json ./
+RUN npm ci
+
+# Copy source
+COPY . .
+
+# Prisma client
+RUN npx prisma generate
+
+ENV NODE_ENV=production
+
+# Command is set per-service in docker-compose.prod.yml

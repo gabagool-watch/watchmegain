@@ -1,0 +1,164 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model TrackedWallet {
+  id        String   @id @default(cuid())
+  address   String   @unique
+  alias     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  trades    Trade[]
+  positions Position[]
+  snapshots Snapshot[]
+
+  @@map("tracked_wallets")
+}
+
+model Market {
+  id          String   @id @default(cuid())
+  conditionId String   @unique @map("condition_id")
+  title       String
+  description String?
+  status      MarketStatus @default(OPEN)
+  outcomes    Json     // Array of outcome objects: [{name: "Yes", index: 0}, {name: "No", index: 1}]
+  endTime     DateTime? @map("end_time")
+  resolutionPrice Json? @map("resolution_price") // {0: 1.0, 1: 0.0} for resolved markets
+  extraJson   Json?    @map("extra_json")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  trades    Trade[]
+  positions Position[]
+
+  @@map("markets")
+}
+
+enum MarketStatus {
+  OPEN
+  CLOSED
+  RESOLVED
+}
+
+model Trade {
+  id          String   @id @default(cuid())
+  walletId    String   @map("wallet_id")
+  marketId    String   @map("market_id")
+  txHash      String   @map("tx_hash")
+  logIndex    Int      @map("log_index")
+  blockTime   DateTime @map("block_time")
+  blockNumber Int      @map("block_number")
+  outcome     Int      // 0 = Yes, 1 = No (or more for multi-outcome)
+  side        TradeSide
+  price       Float    // Price per share in USDC
+  size        Float    // Number of shares
+  cost        Float    // Total cost (size * price +/- fee)
+  fee         Float    @default(0)
+  rawJson     Json?    @map("raw_json")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  wallet TrackedWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  market Market        @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@unique([txHash, logIndex])
+  @@index([walletId, blockTime])
+  @@index([marketId])
+  @@map("trades")
+}
+
+enum TradeSide {
+  BUY
+  SELL
+}
+
+model Position {
+  id              String   @id @default(cuid())
+  walletId        String   @map("wallet_id")
+  marketId        String   @map("market_id")
+  outcome         Int
+  shares          Float    @default(0)
+  avgEntryPrice   Float    @default(0) @map("avg_entry_price")
+  realizedPnl     Float    @default(0) @map("realized_pnl")
+  unrealizedPnl   Float    @default(0) @map("unrealized_pnl")
+  totalCost       Float    @default(0) @map("total_cost")
+  totalFees       Float    @default(0) @map("total_fees")
+  status          PositionStatus @default(OPEN)
+  lastUpdated     DateTime @default(now()) @map("last_updated")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  wallet TrackedWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  market Market        @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@unique([walletId, marketId, outcome])
+  @@index([walletId, status])
+  @@map("positions")
+}
+
+enum PositionStatus {
+  OPEN
+  CLOSED
+}
+
+model Snapshot {
+  id            String   @id @default(cuid())
+  walletId      String   @map("wallet_id")
+  timestamp     DateTime @default(now())
+  equity        Float    @default(0)
+  realizedPnl   Float    @default(0) @map("realized_pnl")
+  unrealizedPnl Float    @default(0) @map("unrealized_pnl")
+  volume30d     Float    @default(0) @map("volume_30d")
+  openPositions Int      @default(0) @map("open_positions")
+  rawJson       Json?    @map("raw_json")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  wallet TrackedWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, timestamp])
+  @@map("snapshots")
+}
+
+model SyncStatus {
+  id           String   @id @default(cuid())
+  jobType      String   @unique @map("job_type")
+  lastRunAt    DateTime? @map("last_run_at")
+  lastSuccess  DateTime? @map("last_success")
+  lastError    String?   @map("last_error")
+  isRunning    Boolean  @default(false) @map("is_running")
+  itemsProcessed Int    @default(0) @map("items_processed")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("sync_status")
+}
+
+/// Stores raw price samples from different venues (Binance, Polymarket, etc.)
+/// Used to measure latency/lag and price differences between exchanges.
+model PriceSample {
+  id          String   @id @default(cuid())
+  source      String              // e.g. "BINANCE", "POLYMARKET"
+  symbol      String              // e.g. "BTCUSDT", "BTC-15M-UP"
+  marketSlug  String?  @map("market_slug")
+  conditionId String?  @map("condition_id")
+  assetId     String?  @map("asset_id")   // Polymarket asset_id / token_id
+  side        String?              // e.g. "BID", "ASK", "TRADE"
+  price       Float
+  isBestBid   Boolean? @map("is_best_bid")
+  isBestAsk   Boolean? @map("is_best_ask")
+  observedAt  DateTime @map("observed_at")
+  extraJson   Json?    @map("extra_json")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([source, symbol, observedAt])
+  @@index([source, symbol, side, observedAt])
+  @@index([conditionId, observedAt])
+  @@map("price_samples")
+}
