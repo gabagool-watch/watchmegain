@@ -1,26 +1,8 @@
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: pnltracker-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-pnltracker}
-    # Do NOT expose Postgres publicly on a VPS. Containers can reach it over the docker network.
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   redis:
     image: redis:7-alpine
     container_name: pnltracker-redis
     restart: unless-stopped
-    # Do NOT expose Redis publicly on a VPS. Containers can reach it over the docker network.
     volumes:
       - redis_data:/data
     healthcheck:
@@ -29,7 +11,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # One-shot DB migration on boot / deploy
+  # One-shot DB migration (runs against Supabase Postgres)
   migrate:
     build:
       context: .
@@ -37,14 +19,8 @@ services:
     container_name: pnltracker-migrate
     restart: "no"
     environment:
-      # Prefer an explicit DATABASE_URL (lets you URL-encode special characters in passwords).
-      # Fallback builds a URL from POSTGRES_* vars.
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pnltracker}?schema=public}
-      # Optional: direct DB URL (recommended when DATABASE_URL points at a pooler, e.g. Supabase)
+      DATABASE_URL: ${DATABASE_URL}
       DIRECT_URL: ${DIRECT_URL:-}
-    depends_on:
-      postgres:
-        condition: service_healthy
     command: ["npm", "run", "-s", "db:deploy"]
 
   app:
@@ -54,14 +30,12 @@ services:
     container_name: pnltracker-app
     restart: unless-stopped
     ports:
-      # Bind to a configurable public port (default 80).
-      # If another project already uses 80, set APP_PORT=3002 (or similar) in your .env.
-      - "${APP_PORT:-80}:3000"
+      - "${APP_PORT:-3002}:3000"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pnltracker}?schema=public}
+      DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: redis://redis:6379
       NODE_ENV: production
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3002}
       # Data Provider Configuration
       DATA_PROVIDER: ${DATA_PROVIDER:-polymarket}
       GOLDSKY_ACTIVITY_ENDPOINT: ${GOLDSKY_ACTIVITY_ENDPOINT:-}
@@ -84,8 +58,6 @@ services:
       POLY_HTTP_KEEPALIVE: ${POLY_HTTP_KEEPALIVE:-1}
       POLY_HTTP_KEEPALIVE_CONNECTIONS: ${POLY_HTTP_KEEPALIVE_CONNECTIONS:-50}
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
       migrate:
@@ -104,7 +76,7 @@ services:
     container_name: pnltracker-worker
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pnltracker}?schema=public}
+      DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: redis://redis:6379
       NODE_ENV: production
       DATA_PROVIDER: ${DATA_PROVIDER:-polymarket}
@@ -118,8 +90,6 @@ services:
       SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-120}
       REORG_LOOKBACK_MINUTES: ${REORG_LOOKBACK_MINUTES:-120}
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
       migrate:
@@ -133,7 +103,7 @@ services:
     container_name: pnltracker-lag-recorder
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pnltracker}?schema=public}
+      DATABASE_URL: ${DATABASE_URL}
       NODE_ENV: production
       # Sampling / sources
       BINANCE_SAMPLE_MS: ${BINANCE_SAMPLE_MS:-100}
@@ -145,16 +115,14 @@ services:
       CHAINLINK_DECIMALS: ${CHAINLINK_DECIMALS:-8}
       GAMMA_MARKETS_API: ${GAMMA_MARKETS_API:-https://gamma-api.polymarket.com}
     depends_on:
-      postgres:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     command: ["npm", "run", "-s", "lag-recorder"]
 
 volumes:
-  postgres_data:
   redis_data:
 
 networks:
   default:
     name: pnltracker-network
+

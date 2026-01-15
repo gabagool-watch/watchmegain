@@ -112,6 +112,30 @@ POLYMARKET_ADDRESS=
 POLYMARKET_PRIVATE_KEY=
 ```
 
+## 3b) Using Supabase instead of self-hosted Postgres (optional)
+
+If you prefer Supabase (hosted Postgres):
+
+- Create a Supabase project
+- In Supabase dashboard → **Project Settings → Database**
+  - Copy the **Connection string** (Direct / non-pooler) and use it for `DIRECT_URL`
+  - Use the direct URL for `DATABASE_URL` too (simplest), or if you use a pooler for runtime, keep `DIRECT_URL` as direct.
+
+In `/opt/pnltracker/.env`, set at least:
+
+```env
+# Must include sslmode=require for Supabase
+DATABASE_URL=postgresql://postgres:<PASSWORD>@<HOST>:5432/postgres?schema=public&sslmode=require
+DIRECT_URL=postgresql://postgres:<PASSWORD>@<HOST>:5432/postgres?schema=public&sslmode=require
+```
+
+Then start with the Supabase compose file (no local Postgres container):
+
+```bash
+cd /opt/pnltracker
+docker compose -f /opt/pnltracker/docker-compose.supabase.prod.yml up -d --build
+```
+
 ## 4) First boot (build + migrate + start everything)
 
 From the repo root:
