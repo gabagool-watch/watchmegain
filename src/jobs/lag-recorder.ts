@@ -49,7 +49,81 @@ interface BinanceBookTicker {
 
 type PriceSampleSide = 'BID' | 'ASK' | 'TRADE' | 'ORACLE' | 'BASELINE';
 
-async function savePriceSample(params: {
+// ============ BATCH WRITE BUFFER ============
+// Buffer samples and write in batches every FLUSH_INTERVAL_MS
+const FLUSH_INTERVAL_MS = 1000; // Write every 1 second
+const MAX_BUFFER_SIZE = 200; // Force flush if buffer exceeds this
+
+interface PriceSampleData {
+  source: string;
+  symbol: string;
+  price: number;
+  side?: PriceSampleSide;
+  isBestBid?: boolean;
+  isBestAsk?: boolean;
+  conditionId?: string;
+  assetId?: string;
+  marketSlug?: string;
+  extraJson?: unknown;
+  observedAt: Date;
+}
+
+let sampleBuffer: PriceSampleData[] = [];
+let flushInterval: NodeJS.Timeout | null = null;
+let isFlushingBuffer = false;
+
+async function flushSampleBuffer() {
+  if (isFlushingBuffer || sampleBuffer.length === 0) return;
+  
+  isFlushingBuffer = true;
+  const toWrite = sampleBuffer;
+  sampleBuffer = []; // Reset buffer immediately
+  
+  try {
+    await prisma.priceSample.createMany({
+      data: toWrite.map(s => ({
+        source: s.source,
+        symbol: s.symbol,
+        price: s.price,
+        side: s.side,
+        isBestBid: s.isBestBid,
+        isBestAsk: s.isBestAsk,
+        conditionId: s.conditionId,
+        assetId: s.assetId,
+        marketSlug: s.marketSlug,
+        observedAt: s.observedAt,
+        extraJson: s.extraJson as any,
+      })),
+      skipDuplicates: true,
+    });
+    // Log every ~10 seconds (10 flushes)
+    if (Math.random() < 0.1) {
+      console.log(`📝 Flushed ${toWrite.length} samples to DB`);
+    }
+  } catch (error) {
+    console.error(`❌ Failed to flush ${toWrite.length} samples:`, error);
+    // Don't re-add to buffer on failure to avoid infinite growth
+  } finally {
+    isFlushingBuffer = false;
+  }
+}
+
+function startBatchWriter() {
+  if (flushInterval) return;
+  flushInterval = setInterval(flushSampleBuffer, FLUSH_INTERVAL_MS);
+  console.log(`📦 Batch writer started (flush every ${FLUSH_INTERVAL_MS}ms, max ${MAX_BUFFER_SIZE} samples)`);
+}
+
+function stopBatchWriter() {
+  if (flushInterval) {
+    clearInterval(flushInterval);
+    flushInterval = null;
+  }
+  // Final flush
+  flushSampleBuffer();
+}
+
+function savePriceSample(params: {
   source: string;
   symbol: string;
   price: number;
@@ -62,38 +136,60 @@ async function savePriceSample(params: {
   extraJson?: unknown;
   observedAt?: Date;
 }) {
-  const {
-    source,
-    symbol,
-    price,
-    side,
-    isBestBid,
-    isBestAsk,
-    conditionId,
-    assetId,
-    marketSlug,
-    extraJson,
-    observedAt,
-  } = params;
+  const sample: PriceSampleData = {
+    source: params.source,
+    symbol: params.symbol,
+    price: params.price,
+    side: params.side,
+    isBestBid: params.isBestBid,
+    isBestAsk: params.isBestAsk,
+    conditionId: params.conditionId,
+    assetId: params.assetId,
+    marketSlug: params.marketSlug,
+    extraJson: params.extraJson,
+    observedAt: params.observedAt ?? new Date(),
+  };
+  
+  sampleBuffer.push(sample);
+  
+  // Force flush if buffer is too large
+  if (sampleBuffer.length >= MAX_BUFFER_SIZE) {
+    flushSampleBuffer();
+  }
+}
 
+// Async version for places that need to wait (like baseline)
+async function savePriceSampleDirect(params: {
+  source: string;
+  symbol: string;
+  price: number;
+  side?: PriceSampleSide;
+  isBestBid?: boolean;
+  isBestAsk?: boolean;
+  conditionId?: string;
+  assetId?: string;
+  marketSlug?: string;
+  extraJson?: unknown;
+  observedAt?: Date;
+}) {
   try {
     await prisma.priceSample.create({
       data: {
-        source,
-        symbol,
-        price,
-        side,
-        isBestBid,
-        isBestAsk,
-        conditionId,
-        assetId,
-        marketSlug,
-        observedAt: observedAt ?? new Date(),
-        extraJson: extraJson as any,
+        source: params.source,
+        symbol: params.symbol,
+        price: params.price,
+        side: params.side,
+        isBestBid: params.isBestBid,
+        isBestAsk: params.isBestAsk,
+        conditionId: params.conditionId,
+        assetId: params.assetId,
+        marketSlug: params.marketSlug,
+        observedAt: params.observedAt ?? new Date(),
+        extraJson: params.extraJson as any,
       },
     });
   } catch (error) {
-    console.error('❌ Failed to save price sample:', error);
+    console.error('❌ Failed to save price sample (direct):', error);
   }
 }
 
@@ -131,7 +227,7 @@ function startBinanceStream() {
         if (shouldWrite) {
           lastBidAt = nowMs;
           lastBidPrice = bid;
-          await savePriceSample({
+          savePriceSample({
             source: 'BINANCE',
             symbol: msg.s,
             price: bid,
@@ -152,7 +248,7 @@ function startBinanceStream() {
         if (shouldWrite) {
           lastAskAt = nowMs;
           lastAskPrice = ask;
-          await savePriceSample({
+          savePriceSample({
             source: 'BINANCE',
             symbol: msg.s,
             price: ask,
@@ -291,7 +387,7 @@ async function ensurePriceToBeatBaseline(params: {
       return;
     }
 
-    await savePriceSample({
+    await savePriceSampleDirect({
       source: 'POLYMARKET_PRICE_TO_BEAT',
       symbol: 'BTCUSD',
       side: 'BASELINE',
@@ -322,13 +418,13 @@ async function ensurePriceToBeatBaseline(params: {
 async function startPolymarketStream() {
   const ws = getPolymarketWS();
 
-  ws.on('trade', async (update) => {
+  ws.on('trade', (update) => {
     if (!update.assetId) return;
     if (update.assetId !== POLY_UP_ASSET_ID && update.assetId !== POLY_DOWN_ASSET_ID) return;
 
     const symbol = update.assetId === POLY_UP_ASSET_ID ? 'POLY_BTC_15M_UP' : 'POLY_BTC_15M_DOWN';
 
-    await savePriceSample({
+    savePriceSample({
       source: 'POLYMARKET',
       symbol,
       price: update.price,
@@ -341,7 +437,7 @@ async function startPolymarketStream() {
     });
   });
 
-  ws.on('orderbook', async (update) => {
+  ws.on('orderbook', (update) => {
     if (!update.assetId) return;
     if (update.assetId !== POLY_UP_ASSET_ID && update.assetId !== POLY_DOWN_ASSET_ID) return;
 
@@ -349,7 +445,7 @@ async function startPolymarketStream() {
     const now = update.timestamp ?? new Date();
 
     if (typeof update.bestBid === 'number') {
-      await savePriceSample({
+      savePriceSample({
         source: 'POLYMARKET',
         symbol,
         price: update.bestBid,
@@ -363,7 +459,7 @@ async function startPolymarketStream() {
     }
 
     if (typeof update.bestAsk === 'number') {
-      await savePriceSample({
+      savePriceSample({
         source: 'POLYMARKET',
         symbol,
         price: update.bestAsk,
@@ -410,9 +506,9 @@ async function startChainlinkStream() {
     return;
   }
 
-  clWs.on('price', async (u) => {
+  clWs.on('price', (u) => {
     if (!Number.isFinite(u.price)) return;
-    await savePriceSample({
+    savePriceSample({
       source: 'CHAINLINK',
       symbol: 'BTCUSD',
       price: u.price,
@@ -444,7 +540,7 @@ async function startPolymarketRTDS() {
   rtdsStarted = true;
 
   const rtds = getPolymarketRTDS();
-  rtds.on('crypto_price', async (u: any) => {
+  rtds.on('crypto_price', (u: any) => {
     const topic = String(u.topic || '');
     const sym = String(u.symbol || '').toLowerCase();
     const value = Number(u.value);
@@ -454,7 +550,7 @@ async function startPolymarketRTDS() {
 
     // Chainlink feed within RTDS (this is what you asked for)
     if (topic === 'crypto_prices_chainlink' && sym === 'btc/usd') {
-      await savePriceSample({
+      savePriceSample({
         source: 'POLYMARKET_RTDS_CHAINLINK',
         symbol: 'BTCUSD',
         price: value,
@@ -470,11 +566,15 @@ async function startPolymarketRTDS() {
   await rtds.connect();
 }
 
-function cleanup() {
+async function cleanup() {
   console.log('\n🛑 Stopping lag recorder...');
   if (marketCheckInterval) {
     clearInterval(marketCheckInterval);
   }
+  // Flush remaining samples before exit
+  stopBatchWriter();
+  await flushSampleBuffer();
+  console.log('✅ Final flush complete');
   process.exit(0);
 }
 
@@ -483,7 +583,10 @@ async function main() {
   console.log('Dit script logt Binance + Polymarket prijzen in de DB (price_samples).');
   console.log('Asset IDs worden automatisch elke 5 minuten geüpdatet naar de actieve BTC 15m market.\n');
 
-  // Start beide streams
+  // Start batch writer (buffers samples and writes every 1 second)
+  startBatchWriter();
+
+  // Start alle streams
   startBinanceStream();
   await startPolymarketStream();
   await startPolymarketRTDS();

@@ -115,7 +115,7 @@ export function TradingDashboard({ data }: { data: DashboardData }) {
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <button
+            <button 
               onClick={() => refreshOrders()}
               className="text-xs text-slate-400 hover:text-white transition-colors px-2 py-1 rounded hover:bg-slate-700"
             >
